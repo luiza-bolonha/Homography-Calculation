@@ -149,9 +149,6 @@ if len(good) > MIN_MATCH_COUNT:
     
     #################################################
     M = compute_normalized_dlt(src_pts, dst_pts)
-    Mcv, mask = cv.findHomography(src_pts, dst_pts, cv.RANSAC,5.0)
-    print("Matriz H CV:\n", Mcv)
-    print("Matriz H Estimada:\n", M)
     #################################################
 
     img4 = cv.warpPerspective(img1, M, (img2.shape[1], img2.shape[0])) 

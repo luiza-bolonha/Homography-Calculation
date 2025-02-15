@@ -7,7 +7,6 @@ import numpy as np
 import matplotlib.pyplot as plt
 import math
 import cv2 as cv
-import random
 
 
 ########################################################################################################################
@@ -16,21 +15,8 @@ import random
 # Saída: norm_points (pontos normalizados)
 #        T (matriz de normalização)
 def normalize_points(points):
-    # Calculate centroid
-    cent = np.mean(points[0:2,:], axis = 1)
     
-    # Calculate the average distance of the points having the centroid as origin
-    dist = np.linalg.norm(points[0:2,:] - cent.reshape(2,1), axis = 0)
-    dist_m = np.mean(dist)
-
-    # Define the scale to have the average distance as sqrt(2)
-    esc = np.sqrt(2)/dist_m
-
-    # Define the normalization matrix (similar transformation)
-    T = np.array([[esc, 0, -esc*cent[0]], [0, esc, -esc*cent[1]], [0,0,1]])
-
-    # Normalize points
-    norm_points = T@points
+    
     
     return norm_points, T
 
@@ -38,44 +24,22 @@ def normalize_points(points):
 # Entrada: pts1, pts2 (pontos "pts1" da primeira imagem e pontos "pts2" da segunda imagem que atendem a pts2=H.pts1)
 # Saída: A (matriz com as duas ou três linhas resultantes da relação pts2 x H.pts1 = 0)
 def compute_A(pts1, pts2):
-    npoints = pts1.shape[1]
-    A = np.zeros((3*npoints,9))
-
-    for k in range(npoints):
-        A[3*k,3:6] = -pts2[2,k]*pts1[:,k]
-        A[3*k,6:9] =  pts2[1,k]*pts1[:,k]
-
-        A[3*k+1,0:3] =  pts2[2,k]*pts1[:,k]
-        A[3*k+1,6:9] = -pts2[0,k]*pts1[:,k]
-
-        A[3*k+2,0:3] = -pts2[1,k]*pts1[:,k]
-        A[3*k+2,3:6] =  pts2[0,k]*pts1[:,k]
-
+    
     return A
 
 # Função do DLT Normalizado
 # Entrada: pts1, pts2 (pontos "pts1" da primeira imagem e pontos "pts2" da segunda imagem que atendem a pts2=H.pts1)
 # Saída: H (matriz de homografia estimada)
 def compute_normalized_dlt(pts1, pts2):
-    # Add homogeneous coordinates
-    pts1 = np.hstack(( pts1, np.ones((pts1.shape[0],1)) )).T
-    pts2 = np.hstack(( pts2, np.ones((pts2.shape[0],1)) )).T
 
-    # Normalize points
-    pts1n, T1 = normalize_points(pts1)
-    pts2n, T2 = normalize_points(pts2)
+    # Normaliza pontos
 
     # Constrói o sistema de equações empilhando a matrix A de cada par de pontos correspondentes normalizados
-    A = compute_A(pts1n, pts2n)
 
     # Calcula o SVD da matriz A_empilhada e estima a homografia H_normalizada 
-    U,S,Vt = np.linalg.svd(A)
-
-    h = Vt[-1,:]
-    H_nomalizada = np.reshape(h,(3,3))
 
     # Denormaliza H_normalizada e obtém H
-    H = np.linalg.inv(T2)@H_nomalizada@T1
+
 
     return H
 
@@ -96,42 +60,25 @@ def compute_normalized_dlt(pts1, pts2):
 def RANSAC(pts1, pts2, dis_threshold, N, Ninl):
     
     # Define outros parâmetros como número de amostras do modelo, probabilidades da equação de N, etc 
-    max_inliers = []
-    best_H = None
-    num_pts = pts1.shape[0]
+    
 
     # Processo Iterativo
-    for _ in range(N):
         # Enquanto não atende a critério de parada
         
         # Sorteia aleatoriamente "s" amostras do conjunto de pares de pontos pts1 e pts2 
-        indices = random.sample(range(num_pts), 4)
-        sample_pts1 = pts1[indices]
-        sample_pts2 = pts2[indices]
-
-        # Usa as amostras para estimar uma homografia usando o DTL Normalizado
-        H = compute_normalized_dlt(sample_pts1, sample_pts2)
         
+        # Usa as amostras para estimar uma homografia usando o DTL Normalizado
+
         # Testa essa homografia com os demais pares de pontos usando o dis_threshold e contabiliza
         # o número de supostos inliers obtidos com o modelo estimado
-        projected_pts = np.dot(H, np.vstack((pts1.T, np.ones(num_pts))))
-        projected_pts /= projected_pts[2]
-        distances = np.linalg.norm(pts2.T - projected_pts[:2], axis=0)
-        inliers = np.where(distances < dis_threshold)[0]
 
         # Se o número de inliers é o maior obtido até o momento, guarda esse conjunto além das "s" amostras utilizadas. 
         # Atualiza também o número N de iterações necessárias
-        if len(inliers) > len(max_inliers):
-            max_inliers = inliers
-            best_H = H
-            N = int(np.log(1 - 0.99) / np.log(1 - (len(inliers) / num_pts) ** 4))
 
     # Terminado o processo iterativo
     # Estima a homografia final H usando todos os inliers selecionados.
-    if best_H is not None:
-        best_H = compute_normalized_dlt(pts1[max_inliers], pts2[max_inliers])
 
-    return best_H, pts1[max_inliers], pts2[max_inliers]
+    return H, pts1_in, pts2_in
 
 
 ########################################################################################################################
@@ -139,8 +86,8 @@ def RANSAC(pts1, pts2, dis_threshold, N, Ninl):
 
 
 MIN_MATCH_COUNT = 10
-img1 = cv.imread('box.jpg', 0)             # queryImage - box
-img2 = cv.imread('photo01a.jpg', 0)        # trainImage - photo01a
+img1 = cv.imread('box.jpg', 0)   # queryImage
+img2 = cv.imread('photo01a.jpg', 0)        # trainImage
 
 # Inicialização do SIFT
 sift = cv.SIFT_create()
@@ -162,18 +109,11 @@ for m, n in matches:
         good.append(m)
 
 if len(good) > MIN_MATCH_COUNT:
-    src_pts = np.float32([ kp1[m.queryIdx].pt for m in good ])#.reshape(-1, 1, 2)
-    dst_pts = np.float32([ kp2[m.trainIdx].pt for m in good ])#.reshape(-1, 1, 2)
+    src_pts = np.float32([ kp1[m.queryIdx].pt for m in good ]).reshape(-1, 1, 2)
+    dst_pts = np.float32([ kp2[m.trainIdx].pt for m in good ]).reshape(-1, 1, 2)
     
     #################################################
-    # Define os parâmetros do RANSAC
-    dis_threshold = 5  # Limiar de distância
-    N = 1000           # Número máximo de iterações
-    Ninl = 10          # Limiar mínimo de inliers
-
-    # Chama a função RANSAC
-    M, src_inliers, dst_inliers = RANSAC(src_pts, dst_pts, dis_threshold, N, Ninl)
-    # M = compute_normalized_dlt(src_pts, dst_pts)
+    M = # AQUI ENTRA A SUA FUNÇÃO DE HOMOGRAFIA!!!!
     #################################################
 
     img4 = cv.warpPerspective(img1, M, (img2.shape[1], img2.shape[0])) 

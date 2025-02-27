@@ -9,7 +9,7 @@ import math
 import cv2 as cv
 import random
 # Set a seed for get the same results
-random.seed(10)
+random.seed(100)
 
 ########################################################################################################################
 # Função para normalizar pontos
@@ -24,6 +24,9 @@ def normalize_points(points):
     dist = np.linalg.norm(points[0:2,:] - cent.reshape(2,1), axis = 0)
     dist_m = np.mean(dist)
 
+    # Avoid errors of division by zero
+    if dist_m==0:
+        dist_m = 1e-16
     # Define the scale to have the average distance as sqrt(2)
     esc = np.sqrt(2)/dist_m
 
@@ -140,81 +143,90 @@ def RANSAC(pts1, pts2, dis_threshold, N, Ninl):
 
 ########################################################################################################################
 # Exemplo de Teste da função de homografia usando o SIFT
+im1s = ['box.jpg','batman.jpg','outdoors01.jpg','comicsStarWars01.jpg','mesa_revista03.jpg']
+im2s = ['photo01a.jpg','outdoor_batman.jpg','outdoors02.jpg','comicsStarWars02.jpg','mesa02_1.jpg']
+for im1,im2 in zip(im1s,im2s):
+    print("Processing",im1,"and",im2)
+    MIN_MATCH_COUNT = 10
+    img1 = cv.imread(im1, 0)             # queryImage - box
+    img2 = cv.imread(im2, 0)        # trainImage - photo01a
+
+    # Inicialização do SIFT
+    sift = cv.SIFT_create()
+
+    kp1, des1 = sift.detectAndCompute(img1, None)
+    kp2, des2 = sift.detectAndCompute(img2, None)
 
 
-MIN_MATCH_COUNT = 10
-img1 = cv.imread('box.jpg', 0)             # queryImage - box
-img2 = cv.imread('photo01a.jpg', 0)        # trainImage - photo01a
+    # FLANN
+    FLANN_INDEX_KDTREE = 1
+    index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
+    search_params = dict(checks=50)
+    flann = cv.FlannBasedMatcher(index_params, search_params)
+    matches = flann.knnMatch(des1, des2, k=2)
 
-# Inicialização do SIFT
-sift = cv.SIFT_create()
+    good = []
+    for m, n in matches:
+        if m.distance < 0.75 * n.distance:
+            good.append(m)
 
-kp1, des1 = sift.detectAndCompute(img1, None)
-kp2, des2 = sift.detectAndCompute(img2, None)
+    if len(good) > MIN_MATCH_COUNT:
+        src_pts = np.float32([ kp1[m.queryIdx].pt for m in good ])#.reshape(-1, 1, 2)
+        dst_pts = np.float32([ kp2[m.trainIdx].pt for m in good ])#.reshape(-1, 1, 2)
+        
+        #################################################
+        # Define os parâmetros do RANSAC
+        dis_threshold = 5  # Limiar de distância
+        N = 10000           # Número máximo de iterações
+        Ninl = 10          # Limiar mínimo de inliers
 
+        # Chama a função RANSAC
+        M, src_inliers, dst_inliers = RANSAC(src_pts, dst_pts, dis_threshold, N, Ninl)
+        # M = compute_normalized_dlt(src_pts, dst_pts)
+        #################################################
 
-# FLANN
-FLANN_INDEX_KDTREE = 1
-index_params = dict(algorithm=FLANN_INDEX_KDTREE, trees=5)
-search_params = dict(checks=50)
-flann = cv.FlannBasedMatcher(index_params, search_params)
-matches = flann.knnMatch(des1, des2, k=2)
+        img4 = cv.warpPerspective(img1, M, (img2.shape[1], img2.shape[0])) 
 
-good = []
-for m, n in matches:
-    if m.distance < 0.75 * n.distance:
-        good.append(m)
+        # Criar uma nova lista de keypoints a partir dos inliers do RANSAC
+        kp1_inliers = []
+        for x in src_inliers:
+            kp1_inliers.append(cv.KeyPoint(x[0], x[1], 1))
+        kp2_inliers = []
+        for x in dst_inliers:
+            kp2_inliers.append(cv.KeyPoint(x[0], x[1], 1))
+        
+        # Criar novos matches apenas para os inliers do RANSAC
+        good_inliers = []
+        for i in range(0,len(kp1_inliers)):
+            good_inliers.append(cv.DMatch(i,i,0))
 
-if len(good) > MIN_MATCH_COUNT:
-    src_pts = np.float32([ kp1[m.queryIdx].pt for m in good ])#.reshape(-1, 1, 2)
-    dst_pts = np.float32([ kp2[m.trainIdx].pt for m in good ])#.reshape(-1, 1, 2)
-    
-    #################################################
-    # Define os parâmetros do RANSAC
-    dis_threshold = 5  # Limiar de distância
-    N = 10000           # Número máximo de iterações
-    Ninl = 10          # Limiar mínimo de inliers
+    else:
+        print("Not enough matches are found - {}/{}".format(len(good), MIN_MATCH_COUNT))
+        matchesMask = None
 
-    # Chama a função RANSAC
-    M, src_inliers, dst_inliers = RANSAC(src_pts, dst_pts, dis_threshold, N, Ninl)
-    # M = compute_normalized_dlt(src_pts, dst_pts)
-    #################################################
+    draw_params = dict(matchColor = (0,255,0), # draw matches in green color
+                    singlePointColor = None,
+                    flags = 2)
 
-    img4 = cv.warpPerspective(img1, M, (img2.shape[1], img2.shape[0])) 
+    #img3 = cv.drawMatches(img1, kp1, img2, kp2, good, None, **draw_params)
+    img3 = cv.drawMatches(img1, kp1_inliers, img2, kp2_inliers, good_inliers, None, **draw_params)
 
-    # Criar uma nova lista de keypoints filtrando apenas os inliers
-    kp1_inliers = [cv.KeyPoint(x[0], x[1], 1) for x in src_inliers]
-    kp2_inliers = [cv.KeyPoint(x[0], x[1], 1) for x in dst_inliers]
+    # Cria subplots para impressao dos resultados
+    fig, axs = plt.subplots(2, 2, figsize=(30, 15))
 
-    # Criar novos matches apenas para os inliers
-    good_inliers = [cv.DMatch(i, i, 0) for i in range(len(kp1_inliers))]
+    axs[0,0].set_title('Resultado RANSAC')
+    axs[0,0].imshow(img3, 'gray')
 
-else:
-    print("Not enough matches are found - {}/{}".format(len(good), MIN_MATCH_COUNT))
-    matchesMask = None
+    axs[0,1].set_title('Primeira imagem')
+    axs[0,1].imshow(img1, 'gray')
 
-draw_params = dict(matchColor = (0,255,0), # draw matches in green color
-                   singlePointColor = None,
-                   flags = 2)
+    axs[1,0].set_title('Segunda imagem')
+    axs[1,0].imshow(img2, 'gray')
 
-#img3 = cv.drawMatches(img1, kp1, img2, kp2, good, None, **draw_params)
-img3 = cv.drawMatches(img1, kp1_inliers, img2, kp2_inliers, good_inliers, None, **draw_params)
+    axs[1,1].set_title('Primeira imagem após transformação')
+    axs[1,1].imshow(img4, 'gray')
 
-# Cria subplots para impressao dos resultados
-fig, axs = plt.subplots(2, 2, figsize=(30, 15))
+    plt.savefig("resultado"+ im1.replace(".jpg","") + "_" + im2.replace(".jpg","") + "_.png")
+    plt.show()
 
-axs[0,0].set_title('Resultado RANSAC')
-axs[0,0].imshow(img3, 'gray')
-
-axs[0,1].set_title('Primeira imagem')
-axs[0,1].imshow(img1, 'gray')
-
-axs[1,0].set_title('Segunda imagem')
-axs[1,0].imshow(img2, 'gray')
-
-axs[1,1].set_title('Primeira imagem após transformação')
-axs[1,1].imshow(img4, 'gray')
-
-plt.show()
-
-########################################################################################################################
+    ########################################################################################################################

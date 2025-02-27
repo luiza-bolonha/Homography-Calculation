@@ -8,7 +8,8 @@ import matplotlib.pyplot as plt
 import math
 import cv2 as cv
 import random
-
+# Set a seed for get the same results
+random.seed(10)
 
 ########################################################################################################################
 # Função para normalizar pontos
@@ -125,7 +126,9 @@ def RANSAC(pts1, pts2, dis_threshold, N, Ninl):
         if len(inliers) > len(max_inliers):
             max_inliers = inliers
             best_H = H
-            N = int(np.log(1 - 0.99) / np.log(1 - (1-0.05) ** 4))
+            # proportion of outliers (%)
+            e = 0.01
+            N = int(np.log(1 - 0.99) / np.log(1 - (1-e) ** 4))
 
     # Terminado o processo iterativo
     # Estima a homografia final H usando todos os inliers selecionados.
@@ -169,7 +172,7 @@ if len(good) > MIN_MATCH_COUNT:
     #################################################
     # Define os parâmetros do RANSAC
     dis_threshold = 5  # Limiar de distância
-    N = 1000           # Número máximo de iterações
+    N = 10000           # Número máximo de iterações
     Ninl = 10          # Limiar mínimo de inliers
 
     # Chama a função RANSAC
@@ -197,19 +200,20 @@ draw_params = dict(matchColor = (0,255,0), # draw matches in green color
 #img3 = cv.drawMatches(img1, kp1, img2, kp2, good, None, **draw_params)
 img3 = cv.drawMatches(img1, kp1_inliers, img2, kp2_inliers, good_inliers, None, **draw_params)
 
+# Cria subplots para impressao dos resultados
 fig, axs = plt.subplots(2, 2, figsize=(30, 15))
 
-axs[0, 0].set_title('Resultado RANSAC')
-axs[0, 0].imshow(img3, 'gray')
+axs[0,0].set_title('Resultado RANSAC')
+axs[0,0].imshow(img3, 'gray')
 
-axs[0, 1].set_title('Primeira imagem')
-axs[0, 1].imshow(img1, 'gray')
+axs[0,1].set_title('Primeira imagem')
+axs[0,1].imshow(img1, 'gray')
 
-axs[1, 0].set_title('Segunda imagem')
-axs[1, 0].imshow(img2, 'gray')
+axs[1,0].set_title('Segunda imagem')
+axs[1,0].imshow(img2, 'gray')
 
-axs[1, 1].set_title('Primeira imagem após transformação')
-axs[1, 1].imshow(img4, 'gray')
+axs[1,1].set_title('Primeira imagem após transformação')
+axs[1,1].imshow(img4, 'gray')
 
 plt.show()
 

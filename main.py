@@ -115,6 +115,7 @@ def RANSAC(pts1, pts2, dis_threshold, N, Ninl):
         # Testa essa homografia com os demais pares de pontos usando o dis_threshold e contabiliza
         # o número de supostos inliers obtidos com o modelo estimado
         projected_pts = np.dot(H, np.vstack((pts1.T, np.ones(num_pts))))
+        projected_pts[projected_pts == 0] = 1e-16
         projected_pts /= projected_pts[2]
         distances = np.linalg.norm(pts2.T - projected_pts[:2], axis=0)
         inliers = np.where(distances < dis_threshold)[0]
@@ -124,7 +125,7 @@ def RANSAC(pts1, pts2, dis_threshold, N, Ninl):
         if len(inliers) > len(max_inliers):
             max_inliers = inliers
             best_H = H
-            N = int(np.log(1 - 0.99) / np.log(1 - (len(inliers) / num_pts) ** 4))
+            N = int(np.log(1 - 0.99) / np.log(1 - (1-0.05) ** 4))
 
     # Terminado o processo iterativo
     # Estima a homografia final H usando todos os inliers selecionados.
@@ -178,6 +179,13 @@ if len(good) > MIN_MATCH_COUNT:
 
     img4 = cv.warpPerspective(img1, M, (img2.shape[1], img2.shape[0])) 
 
+    # Criar uma nova lista de keypoints filtrando apenas os inliers
+    kp1_inliers = [cv.KeyPoint(x[0], x[1], 1) for x in src_inliers]
+    kp2_inliers = [cv.KeyPoint(x[0], x[1], 1) for x in dst_inliers]
+
+    # Criar novos matches apenas para os inliers
+    good_inliers = [cv.DMatch(i, i, 0) for i in range(len(kp1_inliers))]
+
 else:
     print("Not enough matches are found - {}/{}".format(len(good), MIN_MATCH_COUNT))
     matchesMask = None
@@ -185,20 +193,24 @@ else:
 draw_params = dict(matchColor = (0,255,0), # draw matches in green color
                    singlePointColor = None,
                    flags = 2)
-img3 = cv.drawMatches(img1, kp1, img2, kp2, good, None, **draw_params)
+
+#img3 = cv.drawMatches(img1, kp1, img2, kp2, good, None, **draw_params)
+img3 = cv.drawMatches(img1, kp1_inliers, img2, kp2_inliers, good_inliers, None, **draw_params)
 
 fig, axs = plt.subplots(2, 2, figsize=(30, 15))
-fig.add_subplot(2, 2, 1)
-plt.imshow(img3, 'gray')
-fig.add_subplot(2, 2, 2)
-plt.title('Primeira imagem')
-plt.imshow(img1, 'gray')
-fig.add_subplot(2, 2, 3)
-plt.title('Segunda imagem')
-plt.imshow(img2, 'gray')
-fig.add_subplot(2, 2, 4)
-plt.title('Primeira imagem após transformação')
-plt.imshow(img4, 'gray')
+
+axs[0, 0].set_title('Resultado RANSAC')
+axs[0, 0].imshow(img3, 'gray')
+
+axs[0, 1].set_title('Primeira imagem')
+axs[0, 1].imshow(img1, 'gray')
+
+axs[1, 0].set_title('Segunda imagem')
+axs[1, 0].imshow(img2, 'gray')
+
+axs[1, 1].set_title('Primeira imagem após transformação')
+axs[1, 1].imshow(img4, 'gray')
+
 plt.show()
 
 ########################################################################################################################

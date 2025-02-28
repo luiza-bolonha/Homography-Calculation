@@ -8,6 +8,8 @@ import matplotlib.pyplot as plt
 import math
 import cv2 as cv
 import random
+import tqdm
+from pathlib import Path # caminhos compativeis no linux e windows
 # Set a seed for get the same results
 random.seed(100)
 
@@ -97,49 +99,63 @@ def compute_normalized_dlt(pts1, pts2):
 # pts1_in, pts2_in: conjunto de inliers dos pontos da primeira e segunda imagens
 
 
-def RANSAC(pts1, pts2, dis_threshold, N, Ninl):
+def RANSAC(pts1, pts2, dis_threshold, N, Perc_Ninl):
     
     max_inliers_past = []
     best_H = None
     num_pts = pts1.shape[0]
 
     # Processo Iterativo
-    for _ in range(N):
+    # Barrinha para verificar o progresso
+    for _ in tqdm.tqdm(range(N)):
         # Enquanto não atende ao primeiro critério de parada (n de iterações)
         
-        # Sorteia aleatoriamente "s" amostras do conjunto de pares de pontos pts1 e pts2
-        # Semente foi setada acima para reproduzir os mesmos resultados
+        # Sorteia aleatoriamente 4 amostras do conjunto de pares de pontos pts1 e pts2 para estimação da homografia
+        # Semente foi setada acima para reproduzir os mesmos resultados em diferentes pcs
         indices = random.sample(range(num_pts), 4)
         sample_pts1 = pts1[indices]
         sample_pts2 = pts2[indices]
 
-        # Usa as amostras para estimar uma homografia usando o DTL Normalizado
+        # Usa a amostra para estimar uma homografia usando o DTL Normalizado
         H = compute_normalized_dlt(sample_pts1, sample_pts2)
         
         # Testa essa homografia com os demais pares de pontos usando o dis_threshold e contabiliza
         # o número de supostos inliers obtidos com o modelo estimado
-        projected_pts = H@np.vstack((pts1.T, np.ones(num_pts)))
+        projected_pts = np.dot(H,np.vstack((pts1.T, np.ones(num_pts))))
         # Evita erro de divisão por zero
         projected_pts[projected_pts == 0] = 1e-16
         # Normaliza pelo ulltimo elemento fazendo com que posição 2 == 1 
         projected_pts /= projected_pts[2]
-        # Afere-se a distância entre o ponto da imagem 2 e os pontos projetados referentes a DLT normalizada
-        # Da amostra aleatória de 4 pontos do SIFT
+        # Afere-se a distância entre os pontos da imagem 2 e os pontos projetados referentes a DLT normalizada
         distances = np.linalg.norm(pts2.T - projected_pts[:2], axis=0)
         # Cria uma mascara para verificar em quais indexes tem-se distancia menor que o limiar
+        # distances e dis_threshold é dada em pixels
         inliers_mask_now = np.where(distances < dis_threshold)[0]
 
         # Se o número de inliers é o maior obtido até o momento, guarda esse conjunto além das "s" amostras utilizadas. 
         # Atualiza também o número N de iterações necessárias
         # Compara os inliers atuais com os inliers passados
         if len(inliers_mask_now) > len(max_inliers_past):
-            max_inliers = inliers_mask_now
+            max_inliers_past = inliers_mask_now
             best_H = H
             # proportion of outliers (%)
             e = 0.01
             N = int(np.log(1 - 0.99) / np.log(1 - (1-e) ** 4))
+            best_porcentagem_inliers = float(len(inliers_mask_now)/len(distances))
 
-    # Ao sair do loop a variavel best_H conterá a homografia com o melhor número de inliers
+        porcentagem_inliers = float(len(inliers_mask_now)/len(distances)) 
+        if porcentagem_inliers>=Perc_Ninl:
+            # Sai do loop pelo segundo critério de parada pois atingiu-se a porcentagem de inliers setada
+            print("\n Porcentagem de inliers atingida saindo do loop RANSAC..")
+            break
+    
+    print("Quadro resumo:")
+    print("-Melhor porcentagem de inliers:",best_porcentagem_inliers)
+    print("-len_d:",len(distances))
+    print("-len_inl:",len(max_inliers_past))
+    print("\n")
+    max_inliers = max_inliers_past
+    # Ao sair do loop a variavel best_H fica com a homografia que tem o melhor número de inliers
     if best_H is not None:
         best_H = compute_normalized_dlt(pts1[max_inliers], pts2[max_inliers])
 
@@ -149,7 +165,9 @@ def RANSAC(pts1, pts2, dis_threshold, N, Ninl):
 ########################################################################################################################
 # Exemplo de Teste da função de homografia usando o SIFT
 im1s = ['box.jpg','batman.jpg','outdoors01.jpg','comicsStarWars01.jpg','mesa_revista03.jpg']
+im1s = ["imagens/" + im for im in im1s]
 im2s = ['photo01a.jpg','outdoor_batman.jpg','outdoors02.jpg','comicsStarWars02.jpg','mesa02_1.jpg']
+im2s = ["imagens/" + im for im in im2s]
 for im1,im2 in zip(im1s,im2s):
     print("Processing",im1,"and",im2)
     MIN_MATCH_COUNT = 10
@@ -181,11 +199,11 @@ for im1,im2 in zip(im1s,im2s):
         #################################################
         # Define os parâmetros do RANSAC
         dis_threshold = 5  # Limiar de distância
-        N = 10000           # Número máximo de iterações
-        Ninl = 10          # Limiar mínimo de inliers
-
+        N = 20000           # Número máximo de iterações
+        Perc_Ninl = 0.8          # Limiar mínimo de inliers em porcentagem em relação a todos pontos do SIFT
+        # Esse valor de Perc_Ninl geralmente para os casos da em torno de 23%
         # Chama a função RANSAC
-        M, src_inliers, dst_inliers = RANSAC(src_pts, dst_pts, dis_threshold, N, Ninl)
+        M, src_inliers, dst_inliers = RANSAC(src_pts, dst_pts, dis_threshold, N, Perc_Ninl)
         # M = compute_normalized_dlt(src_pts, dst_pts)
         #################################################
 
@@ -230,7 +248,7 @@ for im1,im2 in zip(im1s,im2s):
     axs[1,1].set_title('Primeira imagem após transformação')
     axs[1,1].imshow(img4, 'gray')
 
-    plt.savefig("resultado"+ im1.replace(".jpg","") + "_" + im2.replace(".jpg","") + "_.png")
+    plt.savefig("resultados"+ im1.split("/")[-1].replace(".jpg","") + "_" + im2.split("/")[-1].replace(".jpg","") + "_.png")
     plt.show()
 
     ########################################################################################################################
